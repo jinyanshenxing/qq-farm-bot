@@ -159,7 +159,7 @@ npm start
 ### 一键部署（推荐）
 
 ```bash
-git clone https://github.com/your-username/qq-farm-bot.git
+git clone https://github.com/maile456/qq-farm-bot.git
 cd qq-farm-bot
 
 # 构建镜像并后台启动

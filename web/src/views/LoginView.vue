@@ -4,7 +4,7 @@
       <div class="login-header">
         <el-icon :size="48" color="#67C23A"><Sunny /></el-icon>
         <h1>QQ 农场助手</h1>
-        <p class="login-subtitle">多账号自动化管理平台</p>
+        <p class="login-subtitle">多账号自动化管理平台(admin)</p>
       </div>
 
       <!-- 登录/注册切换 -->
