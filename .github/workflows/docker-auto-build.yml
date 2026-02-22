@@ -1,0 +1,57 @@
+name: Auto Build & Push QQ-Farm-Bot Docker Image (x86/amd64)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      # 1. 拉取仓库代码
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. 设置镜像标签
+      - name: Set Image Tag
+        id: set_tag
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+          else
+            TAG=latest
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      # 3. 登录Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      # 4. 登录GHCR
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 5. 核心修复：移除所有缓存配置，仅基础构建推送
+      - name: Build & Push Docker Image (amd64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64  # 仅适配x86架构
+          tags: |
+            ${{ secrets.DOCKER_HUB_USERNAME }}/qq-farm-bot-ui:${{ steps.set_tag.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ steps.set_tag.outputs.tag }}
+          # 完全移除缓存配置，避免驱动兼容问题
