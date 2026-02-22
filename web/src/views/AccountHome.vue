@@ -30,6 +30,9 @@
       </el-tag>
       <el-button v-if="snapshot?.status !== 'running'" type="primary" size="small" @click="handleStart">启动Bot</el-button>
       <el-button v-else type="warning" size="small" @click="handleStop">停止Bot</el-button>
+      <span v-if="snapshot?.status === 'running' && uptime" class="uptime-text">
+        ⭐ 挂机时长: {{ formatUptime(uptime) }}
+      </span>
     </div>
 
     <!-- 功能开关 -->
@@ -62,6 +65,14 @@
             <span class="toggle-label">自动浇水 <el-tooltip content="自动给干旱地块浇水" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
             <el-switch v-model="toggles.autoWater" @change="saveToggles" />
           </div>
+          <div class="toggle-row">
+            <span class="toggle-label">自动解锁土地 <el-tooltip content="自动开拓新土地" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoLandUnlock" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">自动升级土地 <el-tooltip content="自动升级已有土地等级" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoLandUpgrade" @change="saveToggles" />
+          </div>
         </div>
 
         <div class="toggle-group">
@@ -73,6 +84,10 @@
           <div class="toggle-row">
             <span class="toggle-label">自动偷菜 <el-tooltip content="偷取好友成熟作物" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
             <el-switch v-model="toggles.autoSteal" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">不偷白萝卜 <el-tooltip content="开启后偷菜时跳过白萝卜" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.skipStealRadish" @change="saveToggles" />
           </div>
           <div class="toggle-row">
             <span class="toggle-label">帮忙操作 <el-tooltip content="帮好友浇水除草" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
@@ -161,14 +176,26 @@
     <div v-if="!snapshot && !loading" class="empty-state">
       <el-empty description="暂无数据，请先启动 Bot" />
     </div>
+
+    <!-- QR 扫码登录对话框 -->
+    <QrCodeDialog
+      v-model:visible="qrDialogVisible"
+      :qr-base64="qrBase64"
+      :qr-status="qrStatus"
+      :qr-uin="props.uin"
+      :initial-uin="props.uin"
+      @confirm="handleQrConfirm"
+      @cancel="handleQrCancel"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getAccountSnapshot, updateToggles, startBot, stopBot } from '../api/index.js'
+import { getAccountSnapshot, updateToggles, startBot, stopBot, startQrLogin, cancelQrLogin } from '../api/index.js'
 import { onEvent, offEvent } from '../socket/index.js'
+import QrCodeDialog from '../components/QrCodeDialog.vue'
 
 const props = defineProps({ uin: String })
 
@@ -176,6 +203,13 @@ const loading = ref(false)
 const snapshot = ref(null)
 const toggles = ref(null)
 const stats = ref(null)
+const uptime = ref(0)
+let uptimeTimer = null
+
+// QR 扫码登录状态
+const qrDialogVisible = ref(false)
+const qrBase64 = ref('')
+const qrStatus = ref('idle') // idle | loading | pending | scanned | error
 
 async function fetchData() {
   loading.value = true
@@ -184,8 +218,30 @@ async function fetchData() {
     snapshot.value = res.data
     toggles.value = res.data.featureToggles ? { ...res.data.featureToggles } : null
     stats.value = res.data.dailyStats || null
+    // 初始化挂机时长
+    if (res.data.startedAt) {
+      uptime.value = Date.now() - res.data.startedAt
+      startUptimeTimer(res.data.startedAt)
+    } else {
+      uptime.value = 0
+      stopUptimeTimer()
+    }
   } catch { /* */ } finally {
     loading.value = false
+  }
+}
+
+function startUptimeTimer(startedAt) {
+  stopUptimeTimer()
+  uptimeTimer = setInterval(() => {
+    uptime.value = Date.now() - startedAt
+  }, 1000)
+}
+
+function stopUptimeTimer() {
+  if (uptimeTimer) {
+    clearInterval(uptimeTimer)
+    uptimeTimer = null
   }
 }
 
@@ -198,8 +254,34 @@ async function saveToggles() {
 }
 
 async function handleStart() {
-  try { await startBot(props.uin); ElMessage.success('启动中...'); setTimeout(fetchData, 2000) }
-  catch (e) { ElMessage.error(e.message) }
+  // 打开扫码登录对话框
+  qrDialogVisible.value = true
+  qrBase64.value = ''
+  qrStatus.value = 'idle'
+}
+
+async function handleQrConfirm(form) {
+  qrStatus.value = 'loading'
+  try {
+    const res = await startQrLogin(props.uin, {
+      platform: form.platform,
+      farmInterval: form.farmInterval,
+      friendInterval: form.friendInterval,
+    })
+    qrBase64.value = res.data.qrBase64
+    qrStatus.value = 'pending'
+  } catch (err) {
+    qrStatus.value = 'error'
+    ElMessage.error('获取二维码失败: ' + err.message)
+  }
+}
+
+function handleQrCancel() {
+  if (qrStatus.value === 'pending') {
+    cancelQrLogin(props.uin).catch(() => {})
+  }
+  qrDialogVisible.value = false
+  qrStatus.value = 'idle'
 }
 
 async function handleStop() {
@@ -209,20 +291,75 @@ async function handleStop() {
 
 function formatNum(n) { return n ? Number(n).toLocaleString() : '0' }
 
+function formatUptime(ms) {
+  if (!ms || ms <= 0) return '0秒'
+  const totalSecs = Math.floor(ms / 1000)
+  const days = Math.floor(totalSecs / 86400)
+  const hours = Math.floor((totalSecs % 86400) / 3600)
+  const mins = Math.floor((totalSecs % 3600) / 60)
+  const secs = totalSecs % 60
+  const parts = []
+  if (days > 0) parts.push(`${days}天`)
+  if (hours > 0) parts.push(`${hours}小时`)
+  if (mins > 0) parts.push(`${mins}分`)
+  parts.push(`${secs}秒`)
+  return parts.join('')
+}
+
 function onStateUpdate(data) {
   if (data.userId !== props.uin) return
   if (snapshot.value) {
     snapshot.value.status = data.status
     snapshot.value.userState = data.userState
+    // 更新挂机时长
+    if (data.startedAt) {
+      uptime.value = Date.now() - data.startedAt
+      startUptimeTimer(data.startedAt)
+    } else if (data.status !== 'running') {
+      uptime.value = 0
+      stopUptimeTimer()
+    }
+  }
+}
+
+function onQrScanned(data) {
+  if (data.uin === props.uin) {
+    qrStatus.value = 'scanned'
+    ElMessage.success('扫码成功，正在登录...')
+    setTimeout(() => {
+      qrDialogVisible.value = false
+      fetchData()
+    }, 1500)
+  }
+}
+
+function onQrExpired(data) {
+  if (data.uin === props.uin) {
+    qrStatus.value = 'error'
+    ElMessage.warning(data.reason || '二维码已过期')
+  }
+}
+
+function onQrError(data) {
+  if (data.uin === props.uin) {
+    qrStatus.value = 'error'
+    ElMessage.error(data.reason || '扫码出错')
   }
 }
 
 onMounted(() => {
   fetchData()
   onEvent('bot:stateUpdate', onStateUpdate)
+  onEvent('qr:scanned', onQrScanned)
+  onEvent('qr:expired', onQrExpired)
+  onEvent('qr:error', onQrError)
 })
 onUnmounted(() => {
   offEvent('bot:stateUpdate', onStateUpdate)
+  offEvent('qr:scanned', onQrScanned)
+  offEvent('qr:expired', onQrExpired)
+  offEvent('qr:error', onQrError)
+  stopUptimeTimer()
 })
 </script>
 
@@ -302,6 +439,14 @@ onUnmounted(() => {
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow);
+}
+
+.uptime-text {
+  font-size: 13px;
+  color: var(--color-success);
+  font-weight: 500;
+  margin-left: auto;
+  margin-right: 8px;
 }
 
 .section-card {

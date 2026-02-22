@@ -13,7 +13,7 @@
           <el-input
             v-model="form.uin"
             placeholder="请输入QQ号作为标识"
-            :disabled="qrStatus === 'loading'"
+            :disabled="qrStatus === 'loading' || !!initialUin"
           />
         </el-form-item>
 
@@ -96,6 +96,7 @@ const props = defineProps({
   qrBase64: String,
   qrStatus: String,
   qrUin: String,
+  initialUin: String, // 预填的 QQ 号
 })
 
 const emit = defineEmits(['update:visible', 'confirm', 'cancel'])
@@ -118,6 +119,13 @@ const form = ref({
   platform: 'qq',
   farmIntervalSec: 10,
   friendIntervalSec: 10,
+})
+
+// 当对话框打开时，预填 uin
+watch(() => props.visible, (visible) => {
+  if (visible && props.initialUin) {
+    form.value.uin = props.initialUin
+  }
 })
 
 // QR 倒计时

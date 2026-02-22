@@ -113,6 +113,7 @@
       :qr-base64="qrBase64"
       :qr-status="qrStatus"
       :qr-uin="qrUin"
+      :initial-uin="qrUin"
       @confirm="handleQrConfirm"
       @cancel="handleQrCancel"
     />
@@ -157,8 +158,11 @@ async function fetchAccounts() {
 }
 
 async function handleStart(uin) {
-  try { await startBot(uin); ElMessage.success('启动中...'); fetchAccounts() }
-  catch (e) { ElMessage.error(e.message) }
+  // 直接打开扫码登录对话框
+  showQrDialog.value = true
+  qrBase64.value = ''
+  qrUin.value = uin
+  qrStatus.value = 'idle'
 }
 
 async function handleStop(uin) {

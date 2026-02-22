@@ -47,6 +47,7 @@ const TAG_ICONS = {
     '推送': '📨', '解码': '📦', '错误': '❌',
     '农场': '🌾', '巡田': '🌾', '收获': '🌽', '种植': '🌱',
     '铲除': '🚭', '施肥': '💧', '除草': '🌿', '除虫': '🐛', '浇水': '💦',
+    '解锁': '🔓', '升级': '⬆️',
     '商店': '🛒', '购买': '💰',
     '好友': '👥', '申请': '👋',
     '任务': '📝', '仓库': '📦', 'API': '🌐', '配置': '🔧',
@@ -122,6 +123,8 @@ class BotInstance extends EventEmitter {
             autoWeed: true,
             autoPest: true,
             autoWater: true,
+            autoLandUnlock: true,   // 是否自动解锁新土地
+            autoLandUpgrade: true,  // 是否自动升级土地
             friendVisit: true,
             autoSteal: true,
             friendHelp: true,
@@ -130,6 +133,7 @@ class BotInstance extends EventEmitter {
             autoSell: true,
             autoBuyFertilizer: true,
             helpEvenExpFull: true,
+            skipStealRadish: true,  // 偷菜时跳过白萝卜
         };
 
         // ---------- 今日统计 ----------
@@ -603,6 +607,38 @@ class BotInstance extends EventEmitter {
     }
 
     // ================================================================
+    //  土地升级/解锁 API
+    // ================================================================
+
+    /**
+     * 升级土地
+     * @param {number} landId - 要升级的土地ID
+     * @returns {Promise<Object>} 升级后的土地信息
+     */
+    async upgradeLand(landId) {
+        const body = types.UpgradeLandRequest.encode(types.UpgradeLandRequest.create({
+            land_id: toLong(landId),
+        })).finish();
+        const { body: replyBody } = await this.sendMsgAsync('gamepb.plantpb.PlantService', 'UpgradeLand', body);
+        return types.UpgradeLandReply.decode(replyBody);
+    }
+
+    /**
+     * 解锁土地（开拓新土地）
+     * @param {number} landId - 要解锁的土地ID
+     * @param {boolean} doShared - 是否选择共享土地
+     * @returns {Promise<Object>} 解锁后的土地信息
+     */
+    async unlockLand(landId, doShared = false) {
+        const body = types.UnlockLandRequest.encode(types.UnlockLandRequest.create({
+            land_id: toLong(landId),
+            do_shared: !!doShared,
+        })).finish();
+        const { body: replyBody } = await this.sendMsgAsync('gamepb.plantpb.PlantService', 'UnlockLand', body);
+        return types.UnlockLandReply.decode(replyBody);
+    }
+
+    // ================================================================
     //  商店 & 种植
     // ================================================================
 
@@ -780,11 +816,26 @@ class BotInstance extends EventEmitter {
             harvestable: [], needWater: [], needWeed: [], needBug: [],
             growing: [], empty: [], dead: [], harvestableInfo: [],
             growingDetails: [], // 每块生长中土地的详情
+            unlockable: [],     // 可解锁（开拓）的土地
+            upgradable: [],     // 可升级的土地
         };
         const nowSec = this.getServerTimeSec();
         for (const land of lands) {
             const id = toNum(land.id);
-            if (!land.unlocked) continue;
+            
+            // 未解锁的土地 → 检查是否可以解锁
+            if (!land.unlocked) {
+                if (land.could_unlock) {
+                    result.unlockable.push(id);
+                }
+                continue;
+            }
+            
+            // 已解锁的土地 → 检查是否可以升级
+            if (land.could_upgrade) {
+                result.upgradable.push(id);
+            }
+            
             const plant = land.plant;
             if (!plant || !plant.phases || plant.phases.length === 0) {
                 result.empty.push(id); continue;
@@ -883,6 +934,44 @@ class BotInstance extends EventEmitter {
             if (allDead.length > 0 || allEmpty.length > 0) {
                 try { await this.autoPlantEmptyLands(allDead, allEmpty, unlockedCount); actions.push(`🌱种植×${allDead.length + allEmpty.length}`); }
                 catch (e) { this.logWarn('种植', e.message); }
+            }
+
+            // ==================== 土地解锁/升级 ====================
+            // 解锁新土地（开拓）
+            if (this.featureToggles.autoLandUnlock && status.unlockable.length > 0) {
+                let unlocked = 0;
+                for (const landId of status.unlockable) {
+                    try {
+                        await this.unlockLand(landId, false);
+                        this.log('解锁', `土地#${landId} 解锁成功`);
+                        unlocked++;
+                    } catch (e) {
+                        this.logWarn('解锁', `土地#${landId} 解锁失败: ${e.message}`);
+                    }
+                    await sleep(200);
+                }
+                if (unlocked > 0) {
+                    actions.push(`🔓解锁×${unlocked}`);
+                }
+            }
+
+            // 升级已有土地
+            if (this.featureToggles.autoLandUpgrade && status.upgradable.length > 0) {
+                let upgraded = 0;
+                for (const landId of status.upgradable) {
+                    try {
+                        const reply = await this.upgradeLand(landId);
+                        const newLevel = reply.land ? toNum(reply.land.level) : '?';
+                        this.log('升级', `土地#${landId} 升级成功 → 等级${newLevel}`);
+                        upgraded++;
+                    } catch (e) {
+                        this.logWarn('升级', `土地#${landId} 升级失败: ${e.message}`);
+                    }
+                    await sleep(200);
+                }
+                if (upgraded > 0) {
+                    actions.push(`⬆升级×${upgraded}`);
+                }
             }
 
             const actionStr = actions.length > 0 ? ` → ${actions.join(' | ')}` : ' → 无操作';
@@ -1065,6 +1154,9 @@ class BotInstance extends EventEmitter {
     // ================================================================
 
     analyzeFriendLands(lands, myGid) {
+        // 白萝卜植物ID列表
+        const RADISH_PLANT_IDS = [2020002, 1020002];
+        
         const result = { stealable: [], stealableInfo: [], needWater: [], needWeed: [], needBug: [] };
         for (const land of lands) {
             const id = toNum(land.id);
@@ -1075,8 +1167,12 @@ class BotInstance extends EventEmitter {
             const phaseVal = currentPhase.phase;
             if (phaseVal === PlantPhase.MATURE) {
                 if (plant.stealable) {
-                    result.stealable.push(id);
                     const plantId = toNum(plant.id);
+                    // 跳过白萝卜
+                    if (this.featureToggles.skipStealRadish && RADISH_PLANT_IDS.includes(plantId)) {
+                        continue;
+                    }
+                    result.stealable.push(id);
                     result.stealableInfo.push({ landId: id, plantId, name: getPlantName(plantId) || plant.name || '未知' });
                 }
                 continue;
@@ -1105,7 +1201,7 @@ class BotInstance extends EventEmitter {
         const skipped = [];
 
         // 帮除草
-        if (status.needWeed.length > 0) {
+        if (status.needWeed.length > 0 && this.featureToggles.friendHelp) {
             if (this.featureToggles.helpEvenExpFull || this._canGetExp(10005)) {
                 this._markExpCheck(10005);
                 let ok = 0;
@@ -1119,7 +1215,7 @@ class BotInstance extends EventEmitter {
             }
         }
         // 帮除虫
-        if (status.needBug.length > 0) {
+        if (status.needBug.length > 0 && this.featureToggles.friendHelp) {
             if (this.featureToggles.helpEvenExpFull || this._canGetExp(10006)) {
                 this._markExpCheck(10006);
                 let ok = 0;
@@ -1133,7 +1229,7 @@ class BotInstance extends EventEmitter {
             }
         }
         // 帮浇水
-        if (status.needWater.length > 0) {
+        if (status.needWater.length > 0 && this.featureToggles.friendHelp) {
             if (this.featureToggles.helpEvenExpFull || this._canGetExp(10007)) {
                 this._markExpCheck(10007);
                 let ok = 0;
@@ -1147,7 +1243,7 @@ class BotInstance extends EventEmitter {
             }
         }
         // 偷菜
-        if (status.stealable.length > 0) {
+        if (status.stealable.length > 0 && this.featureToggles.autoSteal) {
             let ok = 0;
             const stolenPlants = [];
             for (let i = 0; i < status.stealable.length; i++) {
@@ -1196,8 +1292,11 @@ class BotInstance extends EventEmitter {
                 const dryNum = p ? toNum(p.dry_num) : 0;
                 const weedNum = p ? toNum(p.weed_num) : 0;
                 const insectNum = p ? toNum(p.insect_num) : 0;
+                // 根据开关决定是否有事可做
+                const canSteal = this.featureToggles.autoSteal && stealNum > 0;
+                const canHelp = this.featureToggles.friendHelp && (dryNum > 0 || weedNum > 0 || insectNum > 0);
                 // 有可偷 或 有可帮忙 → 访问
-                if (stealNum > 0 || dryNum > 0 || weedNum > 0 || insectNum > 0) {
+                if (canSteal || canHelp) {
                     friendsToVisit.push({ gid, name, level: toNum(f.level), stealNum, dryNum, weedNum, insectNum });
                     visitedGids.add(gid);
                 } else {
