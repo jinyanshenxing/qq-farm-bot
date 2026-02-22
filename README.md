@@ -250,9 +250,8 @@ jobs:
           script: |
             cd /root/qq-farm-bot
             git pull origin main
-            cd web && npm install && npm run build
-            cd .. && npm install
-            pm2 restart qq-farm-bot || pm2 start server/index.js --name qq-farm-bot
+            docker compose down
+            docker compose up -d --build
 ```
 
 > 注意：将 `/root/qq-farm-bot` 替换为你服务器上项目的实际路径。
