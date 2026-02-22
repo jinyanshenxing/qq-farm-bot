@@ -123,7 +123,8 @@ class BotInstance extends EventEmitter {
             autoWeed: true,
             autoPest: true,
             autoWater: true,
-            autoLandUpgrade: true,  // 是否自动解锁/升级土地
+            autoLandUnlock: true,   // 是否自动解锁新土地
+            autoLandUpgrade: true,  // 是否自动升级土地
             friendVisit: true,
             autoSteal: true,
             friendHelp: true,
@@ -904,8 +905,6 @@ class BotInstance extends EventEmitter {
             if (status.needWater.length) statusParts.push(`💦水:${status.needWater.length}`);
             if (status.dead.length) statusParts.push(`💫枯:${status.dead.length}`);
             if (status.empty.length) statusParts.push(`⬜空:${status.empty.length}`);
-            if (status.unlockable.length) statusParts.push(`🔓解:${status.unlockable.length}`);
-            if (status.upgradable.length) statusParts.push(`⬆升:${status.upgradable.length}`);
             statusParts.push(`🌱生长:${status.growing.length}`);
 
             const hasWork = status.harvestable.length || status.needWeed.length || status.needBug.length
@@ -938,42 +937,40 @@ class BotInstance extends EventEmitter {
             }
 
             // ==================== 土地解锁/升级 ====================
-            if (this.featureToggles.autoLandUpgrade) {
-                // 解锁新土地（开拓）
-                if (status.unlockable.length > 0) {
-                    let unlocked = 0;
-                    for (const landId of status.unlockable) {
-                        try {
-                            await this.unlockLand(landId, false);
-                            this.log('解锁', `土地#${landId} 解锁成功`);
-                            unlocked++;
-                        } catch (e) {
-                            this.logWarn('解锁', `土地#${landId} 解锁失败: ${e.message}`);
-                        }
-                        await sleep(200);
+            // 解锁新土地（开拓）
+            if (this.featureToggles.autoLandUnlock && status.unlockable.length > 0) {
+                let unlocked = 0;
+                for (const landId of status.unlockable) {
+                    try {
+                        await this.unlockLand(landId, false);
+                        this.log('解锁', `土地#${landId} 解锁成功`);
+                        unlocked++;
+                    } catch (e) {
+                        this.logWarn('解锁', `土地#${landId} 解锁失败: ${e.message}`);
                     }
-                    if (unlocked > 0) {
-                        actions.push(`🔓解锁×${unlocked}`);
-                    }
+                    await sleep(200);
                 }
+                if (unlocked > 0) {
+                    actions.push(`🔓解锁×${unlocked}`);
+                }
+            }
 
-                // 升级已有土地
-                if (status.upgradable.length > 0) {
-                    let upgraded = 0;
-                    for (const landId of status.upgradable) {
-                        try {
-                            const reply = await this.upgradeLand(landId);
-                            const newLevel = reply.land ? toNum(reply.land.level) : '?';
-                            this.log('升级', `土地#${landId} 升级成功 → 等级${newLevel}`);
-                            upgraded++;
-                        } catch (e) {
-                            this.logWarn('升级', `土地#${landId} 升级失败: ${e.message}`);
-                        }
-                        await sleep(200);
+            // 升级已有土地
+            if (this.featureToggles.autoLandUpgrade && status.upgradable.length > 0) {
+                let upgraded = 0;
+                for (const landId of status.upgradable) {
+                    try {
+                        const reply = await this.upgradeLand(landId);
+                        const newLevel = reply.land ? toNum(reply.land.level) : '?';
+                        this.log('升级', `土地#${landId} 升级成功 → 等级${newLevel}`);
+                        upgraded++;
+                    } catch (e) {
+                        this.logWarn('升级', `土地#${landId} 升级失败: ${e.message}`);
                     }
-                    if (upgraded > 0) {
-                        actions.push(`⬆升级×${upgraded}`);
-                    }
+                    await sleep(200);
+                }
+                if (upgraded > 0) {
+                    actions.push(`⬆升级×${upgraded}`);
                 }
             }
 
@@ -1626,19 +1623,8 @@ class BotInstance extends EventEmitter {
             for (const land of lands) {
                 const id = toNum(land.id);
                 const unlocked = !!land.unlocked;
-                const couldUnlock = !!land.could_unlock;
-                const couldUpgrade = !!land.could_upgrade;
-                const level = toNum(land.level);
-                const maxLevel = toNum(land.max_level);
-                const detail = { 
-                    id, unlocked, soilType: toNum(land.soil_type) || 0,
-                    level, maxLevel, couldUnlock, couldUpgrade
-                };
-                if (!unlocked) { 
-                    detail.status = 'locked';
-                    landDetails.push(detail); 
-                    continue; 
-                }
+                const detail = { id, unlocked, soilType: toNum(land.soil_type) || 0 };
+                if (!unlocked) { landDetails.push(detail); continue; }
 
                 const plant = land.plant;
                 if (!plant || !plant.phases || plant.phases.length === 0) {
@@ -1687,8 +1673,6 @@ class BotInstance extends EventEmitter {
                 growing: analysis.growing.length,
                 empty: analysis.empty.length,
                 dead: analysis.dead.length,
-                unlockable: analysis.unlockable.length,
-                upgradable: analysis.upgradable.length,
                 needAttention: analysis.needWater.length + analysis.needWeed.length + analysis.needBug.length,
                 lands: landDetails,
                 updatedAt: Date.now(),

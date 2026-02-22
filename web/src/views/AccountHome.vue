@@ -66,7 +66,11 @@
             <el-switch v-model="toggles.autoWater" @change="saveToggles" />
           </div>
           <div class="toggle-row">
-            <span class="toggle-label">自动升级土地 <el-tooltip content="自动解锁新土地并升级已有土地" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <span class="toggle-label">自动解锁土地 <el-tooltip content="自动开拓新土地" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoLandUnlock" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">自动升级土地 <el-tooltip content="自动升级已有土地等级" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
             <el-switch v-model="toggles.autoLandUpgrade" @change="saveToggles" />
           </div>
         </div>
