@@ -233,62 +233,18 @@ router.put('/accounts/:uin/toggles', canAccessUin, (req, res) => {
 router.get('/plant-ranking', (req, res) => {
     try {
         const level = parseInt(req.query.level) || 1;
-        const plants = gameConfig.getAllPlants();
-        const ranking = [];
+        const ranking = gameConfig.getPlantRanking({ level, sort: 'expPerHour' });
+        res.json({ ok: true, data: ranking });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
 
-        for (const plant of plants) {
-            if (!plant.seed_id) continue;
-
-            // 过滤特殊/测试植物（ID 以 2020 开头，如新手引导白萝卜）
-            if (String(plant.id).startsWith('2020')) continue;
-
-            const seedItem = gameConfig.getItemInfo(plant.seed_id);
-            if (seedItem && seedItem.level_limit && seedItem.level_limit > level) continue;
-            // 过滤价格为 0 的免费种子（非正常商店种子）
-            if (seedItem && seedItem.price === 0) continue;
-
-            const exp = gameConfig.getPlantExp(plant.id) || 0;
-            const growTimeSec = gameConfig.getPlantGrowTime(plant.id) || 0;
-            if (growTimeSec <= 0 || exp <= 0) continue;
-
-            const seasons = plant.seasons || 1;
-
-            // 计算多季作物的回生时间（收获后从倒数第二个阶段重新生长）
-            let regrowSec = 0;
-            if (seasons > 1 && plant.grow_phases) {
-                const phases = plant.grow_phases.split(';').filter(p => p.trim());
-                const durations = phases.map(seg => {
-                    const m = seg.match(/:(\d+)/);
-                    return m ? parseInt(m[1]) : 0;
-                }).filter(d => d > 0);
-                // 回生时间 = 最后一个有效生长阶段的时长
-                if (durations.length > 0) {
-                    regrowSec = durations[durations.length - 1];
-                }
-            }
-
-            // 总经验 = 单次收获经验 × 季数
-            const totalExp = exp * seasons;
-            // 总耗时 = 初始生长时间 + (季数-1) × 回生时间
-            const totalTimeSec = growTimeSec + (seasons - 1) * regrowSec;
-            const expPerHour = (totalExp / totalTimeSec) * 3600;
-
-            ranking.push({
-                id: plant.id,
-                name: plant.name,
-                seedId: plant.seed_id,
-                exp,
-                seasons,
-                totalExp,
-                growTimeSec,
-                regrowSec,
-                totalTimeSec,
-                expPerHour: Math.round(expPerHour * 100) / 100,
-            });
-        }
-
-        ranking.sort((a, b) => b.expPerHour - a.expPerHour);
-        res.json({ ok: true, data: ranking.slice(0, 50) });
+/** GET /api/crop-list — 返回全部作物列表，按解锁等级升序排序（用于作物选择下拉框） */
+router.get('/crop-list', (req, res) => {
+    try {
+        const list = gameConfig.getPlantRanking({ sort: 'unlockLevel' });
+        res.json({ ok: true, data: list });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });
     }

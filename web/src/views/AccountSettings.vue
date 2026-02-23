@@ -19,15 +19,16 @@
             clearable
             filterable
             style="width: 260px"
-            :loading="rankingLoading"
+            :loading="cropListLoading"
           >
             <el-option :value="0" label="自动选择(经验效率最高)" />
             <el-option
-              v-for="item in ranking"
+              v-for="item in cropList"
               :key="item.seedId"
               :value="item.seedId"
-              :label="`${item.name} (${item.expPerHour}经验/时)`"
+              :label="`Lv${item.unlockLevel} ${item.name} (${item.expPerHour}经验/时)`"
             >
+              <span style="color: var(--text-muted); font-size: 11px; margin-right: 4px">Lv{{ item.unlockLevel }}</span>
               <span>{{ item.name }}</span>
               <span v-if="item.seasons > 1" style="color: var(--color-warning); font-size: 11px"> ×{{ item.seasons }}季</span>
               <span style="float: right; color: var(--text-muted); font-size: 12px">{{ item.expPerHour }} 经验/时</span>
@@ -66,6 +67,11 @@
             {{ row.name }}<span v-if="row.seasons > 1" class="seasons-badge">×{{ row.seasons }}季</span>
           </template>
         </el-table-column>
+        <el-table-column label="解锁等级" width="90" align="center">
+          <template #default="{ row }">
+            Lv{{ row.unlockLevel || '?' }}
+          </template>
+        </el-table-column>
         <el-table-column label="生长周期" width="130" align="center">
           <template #default="{ row }">
             <span>{{ formatGrowTime(row.totalTimeSec || row.growTimeSec) }}</span>
@@ -90,7 +96,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getAccountSnapshot, updateAccountConfig, getPlantRanking } from '../api/index.js'
+import { getAccountSnapshot, updateAccountConfig, getPlantRanking, getCropList } from '../api/index.js'
 
 const props = defineProps({ uin: String })
 
@@ -102,6 +108,8 @@ const userLevel = ref(1)
 
 const ranking = ref([])
 const rankingLoading = ref(false)
+const cropList = ref([])
+const cropListLoading = ref(false)
 
 async function fetchConfig() {
   try {
@@ -140,6 +148,16 @@ async function fetchRanking() {
   }
 }
 
+async function fetchCropList() {
+  cropListLoading.value = true
+  try {
+    const res = await getCropList()
+    cropList.value = res.data || []
+  } catch { /* */ } finally {
+    cropListLoading.value = false
+  }
+}
+
 function formatGrowTime(sec) {
   if (!sec) return '-'
   if (sec < 60) return `${sec}秒`
@@ -152,6 +170,7 @@ function formatGrowTime(sec) {
 onMounted(async () => {
   await fetchConfig()
   fetchRanking()
+  fetchCropList()
 })
 </script>
 

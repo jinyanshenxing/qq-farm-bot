@@ -17,8 +17,8 @@ const { CONFIG, PlantPhase, PHASE_NAMES } = require('../src/config');
 const {
     getPlantNameBySeedId, getPlantName, getPlantExp,
     formatGrowTime, getPlantGrowTime, getItemName, getFruitName,
+    getPlantRanking,
 } = require('../src/gameConfig');
-const { getPlantingRecommendation } = require('../tools/calc-exp-yield');
 
 const seedShopData = require('../tools/seed-shop-merged-export.json');
 const FRUIT_ID_SET = new Set(
@@ -726,11 +726,14 @@ class BotInstance extends EventEmitter {
             available.sort((a, b) => a.requiredLevel - b.requiredLevel || a.price - b.price);
             return available[0];
         }
+        // 使用排行榜经验效率排序选择最优种子
         try {
-            const rec = getPlantingRecommendation(state.level, landsCount == null ? 18 : landsCount, { top: 50 });
-            const rankedSeedIds = rec.candidatesNormalFert.map(x => x.seedId);
-            for (const seedId of rankedSeedIds) {
-                const hit = available.find(x => x.seedId === seedId);
+            const ranking = getPlantRanking({ level: state.level, sort: 'expPerHour' });
+            if (ranking.length > 0) {
+                this.log('商店', `排行榜第1: ${ranking[0].name} (${ranking[0].expPerHour}经验/时, seedId:${ranking[0].seedId})`);
+            }
+            for (const entry of ranking) {
+                const hit = available.find(x => x.seedId === entry.seedId);
                 if (hit) return hit;
             }
         } catch (e) { /* fallback */ }

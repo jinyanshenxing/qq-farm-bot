@@ -290,6 +290,7 @@ git push
 - [linguo2625469/qq-farm-bot](https://github.com/linguo2625469/qq-farm-bot) — QQ 农场 Bot 核心实现
 - [lkeme/QRLib](https://github.com/lkeme/QRLib) — QQ 扫码登录库
 - [QianChenJun/qq-farm-bot](https://github.com/QianChenJun/qq-farm-bot) — QQ 农场 Bot 参考实现
+- [Penty-d/qq-farm-bot-ui](https://github.com/Penty-d/qq-farm-bot-ui) — QQ 农场 Bot 多功能参考实现
 
 ---
 

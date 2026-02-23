@@ -104,6 +104,11 @@ export function getPlantRanking(level = 1) {
   return api.get('/plant-ranking', { params: { level } })
 }
 
+// 全部作物列表（按解锁等级排序，用于作物选择下拉框）
+export function getCropList() {
+  return api.get('/crop-list')
+}
+
 // 管理员
 export function getAdminUsers() {
   return api.get('/admin/users')

@@ -246,6 +246,79 @@ function getItemName(itemId) {
     return `未知物品`;
 }
 
+// ============ 种植效率排行（共享逻辑） ============
+
+/**
+ * 计算种植效率排行
+ * @param {object} [opts]
+ * @param {number} [opts.level]  - 若指定，仅返回 <= 该等级解锁的作物
+ * @param {string} [opts.sort]   - 排序方式: 'expPerHour'(默认) | 'unlockLevel'
+ * @returns {Array<{id,name,seedId,unlockLevel,exp,seasons,totalExp,growTimeSec,regrowSec,totalTimeSec,expPerHour}>}
+ */
+function getPlantRanking(opts = {}) {
+    const plants = plantConfig || [];
+    const level = opts.level || null;
+    const sortBy = opts.sort || 'expPerHour';
+    const result = [];
+
+    for (const plant of plants) {
+        if (!plant.seed_id) continue;
+        // 过滤特殊/测试植物（ID 以 2020 开头，如新手引导白萝卜）
+        if (String(plant.id).startsWith('2020')) continue;
+
+        const seedItem = getItemInfoById(plant.seed_id);
+        const unlockLevel = (seedItem && seedItem.level) ? seedItem.level : 0;
+        if (level != null && unlockLevel > level) continue;
+        // 过滤价格为 0 的免费种子（非正常商店种子）
+        if (seedItem && seedItem.price === 0) continue;
+
+        const exp = plant.exp || 0;
+        const growTimeSec = getPlantGrowTime(plant.id) || 0;
+        if (growTimeSec <= 0 || exp <= 0) continue;
+
+        const seasons = plant.seasons || 1;
+
+        // 计算多季作物的回生时间
+        let regrowSec = 0;
+        if (seasons > 1 && plant.grow_phases) {
+            const phases = plant.grow_phases.split(';').filter(p => p.trim());
+            const durations = phases.map(seg => {
+                const m = seg.match(/:(\d+)/);
+                return m ? parseInt(m[1]) : 0;
+            }).filter(d => d > 0);
+            if (durations.length > 0) {
+                regrowSec = durations[durations.length - 1];
+            }
+        }
+
+        const totalExp = exp * seasons;
+        const totalTimeSec = growTimeSec + (seasons - 1) * regrowSec;
+        const expPerHour = totalTimeSec > 0 ? Math.round((totalExp / totalTimeSec) * 3600 * 100) / 100 : 0;
+
+        result.push({
+            id: plant.id,
+            name: plant.name,
+            seedId: plant.seed_id,
+            unlockLevel,
+            exp,
+            seasons,
+            totalExp,
+            growTimeSec,
+            regrowSec,
+            totalTimeSec,
+            expPerHour,
+        });
+    }
+
+    if (sortBy === 'unlockLevel') {
+        result.sort((a, b) => a.unlockLevel - b.unlockLevel || b.expPerHour - a.expPerHour);
+    } else {
+        result.sort((a, b) => b.expPerHour - a.expPerHour);
+    }
+
+    return result;
+}
+
 // 启动时加载配置
 loadConfigs();
 
@@ -271,4 +344,6 @@ module.exports = {
     getItemName,
     getItemInfo: getItemInfoById,
     getItemInfoById,
+    // 种植效率排行
+    getPlantRanking,
 };
