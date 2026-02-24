@@ -117,6 +117,42 @@
             <span class="toggle-label">自动购买肥料 <el-tooltip content="施肥时自动购买肥料" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
             <el-switch v-model="toggles.autoBuyFertilizer" @change="saveToggles" />
           </div>
+          <div class="toggle-row">
+            <span class="toggle-label">图鉴奖励 <el-tooltip content="自动领取可用的图鉴奖励" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoIllustrated" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">点券购买化肥 <el-tooltip content="用点券自动购买有机化肥" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoFertilizerBuy" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">使用化肥礼包 <el-tooltip content="自动使用化肥礼包填充容器" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoFertilizerUse" @change="saveToggles" />
+          </div>
+        </div>
+
+        <div class="toggle-group">
+          <div class="toggle-group-title">每日奖励</div>
+          <div class="toggle-row">
+            <span class="toggle-label">商城免费礼包 <el-tooltip content="自动领取商城免费商品" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoFreeGifts" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">分享奖励 <el-tooltip content="自动完成分享并领取奖励" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoShareReward" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">月卡奖励 <el-tooltip content="自动领取月卡每日奖励" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoMonthCard" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">邮箱奖励 <el-tooltip content="自动领取邮件附件奖励" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoEmailReward" @change="saveToggles" />
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">QQ会员奖励 <el-tooltip content="自动领取QQ会员每日礼包" placement="top"><el-icon :size="14"><QuestionFilled /></el-icon></el-tooltip></span>
+            <el-switch v-model="toggles.autoVipGift" @change="saveToggles" />
+          </div>
         </div>
       </div>
     </div>

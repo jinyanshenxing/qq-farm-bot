@@ -22,6 +22,7 @@
             :loading="cropListLoading"
           >
             <el-option :value="0" label="自动选择(经验效率最高)" />
+            <el-option :value="29999" label="白萝卜仙人 (疯狂种植白萝卜)" />
             <el-option
               v-for="item in cropList"
               :key="item.seedId"
@@ -102,7 +103,7 @@ const props = defineProps({ uin: String })
 
 const farmIntervalSec = ref(1)
 const friendIntervalSec = ref(10)
-const preferredSeedId = ref(0)
+const preferredSeedId = ref(29999)
 const saving = ref(false)
 const userLevel = ref(1)
 
@@ -118,7 +119,7 @@ async function fetchConfig() {
     farmIntervalSec.value = Math.round((data.farmInterval || 1000) / 1000)
     friendIntervalSec.value = Math.round((data.friendInterval || 10000) / 1000)
     userLevel.value = data.userState?.level || 1
-    preferredSeedId.value = data.preferredSeedId || 0
+    preferredSeedId.value = data.preferredSeedId || 29999
   } catch { /* */ }
 }
 

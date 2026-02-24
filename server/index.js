@@ -81,11 +81,13 @@ async function main() {
     //  Socket.io 事件桥接
     // ============================================================
 
+    const { maskAccountsPublic } = require('./account-utils');
+
     io.on('connection', (socket) => {
         console.log(`[Socket.io] 客户端连接: ${socket.id}`);
 
         // 客户端连接后立即推送当前所有账号状态
-        socket.emit('accounts:list', botManager.listAccounts());
+        socket.emit('accounts:list', maskAccountsPublic(botManager.listAccounts()));
 
         // 客户端可以请求特定账号的日志
         socket.on('logs:subscribe', (uin) => {

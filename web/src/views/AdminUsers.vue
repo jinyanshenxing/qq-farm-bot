@@ -116,9 +116,12 @@ async function fetchUsers() {
     const res = await getAdminUsers()
     users.value = (res.data || []).map(u => ({
       ...u,
-      allowedUins: u.allowed_uins ? JSON.parse(u.allowed_uins) : [],
+      // allowed_uins 是逗号分隔的字符串，不是 JSON
+      allowedUins: u.allowed_uins ? u.allowed_uins.split(',').map(s => s.trim()).filter(Boolean) : [],
     }))
-  } catch { /* */ } finally {
+  } catch (e) { 
+    console.error('fetchUsers error:', e)
+  } finally {
     loading.value = false
   }
 }
@@ -163,7 +166,8 @@ async function handleSave() {
     const payload = {
       username: form.value.username,
       role: form.value.role,
-      allowed_uins: JSON.stringify(form.value.role === 'admin' ? [] : form.value.allowedUins),
+      // 使用逗号分隔格式，不是 JSON
+      allowedUins: form.value.role === 'admin' ? '' : form.value.allowedUins.join(','),
     }
     if (form.value.password) {
       payload.password = form.value.password

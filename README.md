@@ -100,7 +100,13 @@ qq-farm-bot/
 ├── proto/                   # Protobuf 协议定义文件
 ├── gameConfig/              # 游戏数据 (Plant.json / ItemInfo.json / RoleLevel.json)
 ├── tools/                   # 辅助工具 (经验收益计算器)
+├── docker-compose.yml       # Docker 生产环境配置 (直接拉取镜像)
+├── docker-compose.dev.yml   # Docker 开发环境配置 (本地构建)
+├── .github/workflows/       # GitHub Actions 工作流
+│   ├── deploy.yml           # 自动部署到服务器配置
+│   └── docker.yml           # Docker 镜像自动构建与推送配置
 └── data/                    # 运行时数据 (SQLite 数据库文件)
+
 ```
 
 ---
@@ -156,41 +162,61 @@ npm start
 
 ## Docker 部署
 
-### 一键部署（推荐）
+本项目提供了两种 Docker 部署方式，分别满足**小白用户快速体验**与**开发者本地调试**的需求。
+
+### 1. 生产环境部署（面向普通用户，推荐）
+
+直接拉取云端预编译好的镜像，实现秒级启动，无需在本地耗时编译环境。
+
+1. 在你的服务器或本地新建一个目录，并下载本项目的 `docker-compose.yml` 文件。
+2. （可选）编辑 `docker-compose.yml`，修改 `BOT_ENCRYPT_KEY` 为你的 32 位随机密钥（生产环境建议修改）。生成随机密钥：`openssl rand -hex 16`
+3. 在该目录下运行：
 
 ```bash
-git clone https://github.com/maile456/qq-farm-bot.git
-cd qq-farm-bot
+docker compose up -d
 
-# 构建镜像并后台启动
-docker compose up -d --build
 ```
 
-首次构建需要 2~5 分钟（下载 Node 镜像 + 安装依赖 + 编译前端），完成后访问 `http://服务器IP:3000`。
+启动完成后，访问 `http://你的IP:3000` 即可。
 
-### 配置
+### 2. 开发环境部署（面向开发者）
 
-编辑 `docker-compose.yml` 修改端口和加密密钥：
+如果你修改了项目源码，希望在本地通过 Docker 重新构建并测试效果，请使用 `docker-compose.dev.yml`。
 
-```yaml
-services:
-  qq-farm-bot:
-    ports:
-      - "3000:3000"        # 修改左边的端口号以更换对外端口
-    environment:
-      - PORT=3000
-      - BOT_ENCRYPT_KEY=你的32位随机密钥  # 生产环境建议修改
+1. 克隆完整代码库到本地。
+2. 在项目根目录下运行：
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+
 ```
 
-> 生成随机密钥：`openssl rand -hex 16`
+> 首次本地构建需要 2~5 分钟时间（包含下载基础镜像、安装依赖和前端打包）。
 
 ---
 
-## GitHub Actions 自动部署
+## GitHub Actions 自动化
 
-配置后，每次 push 到 main 分支，服务器会自动拉取最新代码并重启服务。
+本项目配置了完善的 GitHub Actions 工作流。
 
-### 1. 服务器准备
+### 1. 自动打包发布到 DockerHub
+
+当你推送代码并打上版本标签（如 `v2.0.0`）时，会自动触发 `.github/workflows/docker.yml`，构建跨平台镜像并推送到 DockerHub。
+
+**配置你的专属构建流（如果你 Fork 了本仓库）：**
+
+1. 在你的仓库 **Settings** -> **Secrets and variables** -> **Actions** 中添加：
+* `DOCKERHUB_USERNAME`: 你的 DockerHub 用户名
+* `DOCKERHUB_TOKEN`: 你的 DockerHub 访问令牌
+
+
+2. 在 `docker-compose.yml` 中将镜像地址修改为你自己的：`image: 你的用户名/qq-farm-bot:latest`
+
+### 2. 自动部署到服务器
+
+配置后，每次 push 到 `main` 分支，服务器会自动拉取最新代码并使用 `docker-compose.dev.yml` 重启服务。
+
+#### 服务器准备
 
 在服务器上生成 SSH 密钥（如果已有可跳过）：
 
@@ -211,7 +237,7 @@ chmod 600 ~/.ssh/authorized_keys
 cat ~/.ssh/id_ed25519
 ```
 
-### 2. 配置 GitHub Secrets
+#### 配置 GitHub Secrets
 
 进入仓库页面 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
 
@@ -224,39 +250,22 @@ cat ~/.ssh/id_ed25519
 | `SERVER_PORT` | SSH 端口（通常 `22`） |
 | `SERVER_SSH_KEY` | 服务器私钥（`cat ~/.ssh/id_ed25519` 的完整输出，包含 BEGIN 和 END 行） |
 
-### 3. 创建 Workflow 文件
+#### 自动部署工作流说明
 
-在项目根目录创建 `.github/workflows/deploy.yml`：
+`.github/workflows/deploy.yml` 会在推送 `main` 分支时自动执行以下脚本：
 
 ```yaml
-name: 自动部署到服务器
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 部署到服务器
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
           script: |
             cd /root/qq-farm-bot
             git pull origin main
-            docker compose down
-            docker compose up -d --build
+            docker compose -f docker-compose.dev.yml down
+            docker compose -f docker-compose.dev.yml up -d --build
+
 ```
 
-> 注意：将 `/root/qq-farm-bot` 替换为你服务器上项目的实际路径。
+> **注意：** 部署脚本中的 `/root/qq-farm-bot` 为默认服务器路径，请确保代码已 Clone 到该位置，或根据实际情况修改 Workflow 文件中的路径。
 
-### 4. 推送并测试
+#### 推送并测试
 
 ```bash
 git add -A

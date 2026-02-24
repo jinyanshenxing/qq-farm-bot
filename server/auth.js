@@ -81,7 +81,20 @@ function canAccessUin(req, res, next) {
     // 从数据库获取最新的 allowed_uins（JWT 中的可能过时）
     const adminUser = db.getAdminUserById(req.user.id);
     const allowed = (adminUser?.allowed_uins || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (allowed.length > 0 && !allowed.includes(uin)) {
+    // 如果没有任何绑定账号，普通用户不应有额外权限
+    const hasAllowed = (targetUin) => {
+        if (allowed.includes(targetUin)) return true;
+        // 兼容可能存在的 wx_ 前缀差异
+        if (targetUin && targetUin.startsWith('wx_')) {
+            const stripped = targetUin.slice(3);
+            if (allowed.includes(stripped)) return true;
+        } else if (targetUin) {
+            if (allowed.includes('wx_' + targetUin)) return true;
+        }
+        return false;
+    };
+
+    if (!hasAllowed(uin)) {
         return res.status(403).json({ ok: false, error: '无权访问该账号' });
     }
     next();

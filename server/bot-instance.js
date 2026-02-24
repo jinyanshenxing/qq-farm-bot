@@ -111,29 +111,58 @@ class BotInstance extends EventEmitter {
         // ---------- 仓库 ----------
         this.sellTimer = null;
 
+        // ---------- 每日奖励状态追踪 ----------
+        this.dailyRewardState = {
+            freeGifts: '',        // 商城免费礼包完成日期
+            share: '',            // 分享奖励完成日期
+            monthCard: '',        // 月卡奖励完成日期
+            email: '',            // 邮箱奖励完成日期
+            vipGift: '',          // QQ会员奖励完成日期
+            illustrated: '',      // 图鉴奖励完成日期
+            fertilizerBuy: '',    // 化肥购买完成日期
+            fertilizerUse: '',    // 化肥礼包使用完成日期
+        };
+        this.lastFertilizerBuyAt = 0;  // 上次购买化肥时间
+        this.dailyRoutineTimer = null; // 每日任务定时器
+
         // ---------- 日志缓冲 ----------
         this._logs = [];      // 最近 N 条日志
         this.MAX_LOGS = 500;
 
         // ---------- 功能开关 (前端可控制) ----------
         this.featureToggles = {
-            autoHarvest: true,
-            autoPlant: true,
-            autoFertilize: true,
-            autoWeed: true,
-            autoPest: true,
-            autoWater: true,
-            autoLandUnlock: true,   // 是否自动解锁新土地
-            autoLandUpgrade: true,  // 是否自动升级土地
-            friendVisit: true,
-            autoSteal: true,
-            friendHelp: true,
-            friendPest: true,
-            autoTask: true,
-            autoSell: true,
-            autoBuyFertilizer: true,
-            helpEvenExpFull: true,
-            skipStealRadish: true,  // 偷菜时跳过白萝卜
+            // ========== 农场基础功能 ==========
+            autoHarvest: true,         // 自动收获成熟作物
+            autoPlant: true,           // 自动种植空地
+            autoFertilize: false,       // 自动施肥
+            autoWeed: true,            // 自动除草
+            autoPest: true,            // 自动除虫
+            autoWater: true,           // 自动浇水
+            autoLandUnlock: true,      // 自动解锁新土地（开拓）
+            autoLandUpgrade: true,     // 自动升级土地
+            
+            // ========== 好友互动功能 ==========
+            friendVisit: true,         // 访问好友农场
+            autoSteal: true,           // 自动偷菜
+            friendHelp: true,          // 帮好友除草/除虫/浇水
+            friendPest: true,          // 给好友放虫（损人）
+            helpEvenExpFull: true,     // 经验满了也继续帮忙
+            skipStealRadish: true,     // 偷菜时跳过白萝卜
+            
+            // ========== 系统功能 ==========
+            autoTask: true,            // 自动完成并领取任务
+            autoSell: true,            // 自动卖出仓库作物
+            autoBuyFertilizer: false,   // 自动购买化肥（金币）
+            
+            // ========== 每日奖励功能 ==========
+            autoFreeGifts: true,       // 商城免费礼包
+            autoShareReward: true,     // 分享奖励
+            autoMonthCard: true,       // 月卡每日奖励
+            autoEmailReward: true,     // 邮箱奖励自动领取
+            autoVipGift: true,         // QQ会员每日礼包
+            autoIllustrated: true,     // 图鉴奖励自动领取
+            autoFertilizerBuy: false,  // 点券购买化肥（消耗点券，默认关）
+            autoFertilizerUse: false,   // 使用化肥礼包
         };
 
         // ---------- 今日统计 ----------
@@ -1419,6 +1448,542 @@ class BotInstance extends EventEmitter {
 
     _initTaskSystem() {
         setTimeout(() => this.checkAndClaimTasks(), 4000);
+        // 启动每日奖励系统
+        this._initDailyRewardSystem();
+    }
+
+    // ================================================================
+    //  每日奖励系统 (8个新功能)
+    // ================================================================
+
+    _getDateKey() {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    _isDoneToday(key) {
+        return this.dailyRewardState[key] === this._getDateKey();
+    }
+
+    _markDoneToday(key) {
+        this.dailyRewardState[key] = this._getDateKey();
+    }
+
+    _getRewardSummary(items) {
+        if (!items || items.length === 0) return '无奖励';
+        const parts = [];
+        for (const item of items) {
+            const id = toNum(item.id);
+            const count = toNum(item.count);
+            if (count <= 0) continue;
+            if (id === 1 || id === 1001) parts.push(`💰金币+${count}`);
+            else if (id === 2 || id === 1101) parts.push(`⭐经验+${count}`);
+            else if (id === 1002) parts.push(`💎点券+${count}`);
+            else parts.push(`${getItemName(id)}×${count}`);
+        }
+        return parts.join(' | ') || '无奖励';
+    }
+
+    _initDailyRewardSystem() {
+        // 首次执行延迟 8 秒
+        setTimeout(() => this._runDailyRewards(), 8000);
+        // 每小时检查一次
+        this.dailyRoutineTimer = setInterval(() => this._runDailyRewards(), 60 * 60 * 1000);
+    }
+
+    async _runDailyRewards() {
+        if (this.status !== 'running') return;
+        const toggles = this.featureToggles;
+        
+        try {
+            if (toggles.autoFreeGifts) await this._claimFreeGifts();
+            await sleep(500);
+            if (toggles.autoShareReward) await this._claimShareReward();
+            await sleep(500);
+            if (toggles.autoMonthCard) await this._claimMonthCard();
+            await sleep(500);
+            if (toggles.autoEmailReward) await this._claimEmailRewards();
+            await sleep(500);
+            if (toggles.autoVipGift) await this._claimVipGift();
+            await sleep(500);
+            if (toggles.autoIllustrated) await this._claimIllustratedRewards();
+            await sleep(500);
+            if (toggles.autoFertilizerUse) await this._useFertilizerGiftPacks();
+            await sleep(500);
+            if (toggles.autoFertilizerBuy) await this._buyOrganicFertilizer();
+        } catch (e) {
+            this.logWarn('奖励', `每日奖励检查出错: ${e.message}`);
+        }
+    }
+
+    // --- 1. 商城免费礼包 ---
+    async _claimFreeGifts(force = false) {
+        if (!force && this._isDoneToday('freeGifts')) return 0;
+        
+        try {
+            // 获取商城列表 (slot_type=1 为普通商城)
+            const reqBody = types.GetMallListBySlotTypeRequest.encode(
+                types.GetMallListBySlotTypeRequest.create({ slot_type: 1 })
+            ).finish();
+            const { body: replyBody } = await this.sendMsgAsync(
+                'gamepb.mallpb.MallService', 'GetMallListBySlotType', reqBody
+            );
+            const reply = types.GetMallListBySlotTypeResponse.decode(replyBody);
+            const goodsList = reply.goods_list || [];
+
+            let claimed = 0;
+            for (const goodsBytes of goodsList) {
+                try {
+                    const goods = types.MallGoods.decode(goodsBytes);
+                    if (goods.is_free && goods.goods_id > 0) {
+                        const purchaseReq = types.PurchaseRequest.encode(
+                            types.PurchaseRequest.create({ goods_id: goods.goods_id, count: 1 })
+                        ).finish();
+                        await this.sendMsgAsync('gamepb.mallpb.MallService', 'Purchase', purchaseReq);
+                        claimed++;
+                        await sleep(200);
+                    }
+                } catch (e) { /* 单个商品解析失败，继续 */ }
+            }
+
+            if (claimed > 0) {
+                this.log('商城', `🎁 领取免费礼包 ×${claimed}`);
+            }
+            this._markDoneToday('freeGifts');
+            return claimed;
+        } catch (e) {
+            if (!e.message.includes('已领取')) {
+                this.logWarn('商城', `免费礼包领取失败: ${e.message}`);
+            }
+            this._markDoneToday('freeGifts');
+            return 0;
+        }
+    }
+
+    // --- 2. 分享奖励 ---
+    async _claimShareReward(force = false) {
+        if (!force && this._isDoneToday('share')) return false;
+
+        try {
+            // 检查是否可分享
+            const checkReq = types.CheckCanShareRequest.encode(
+                types.CheckCanShareRequest.create({})
+            ).finish();
+            const { body: checkBody } = await this.sendMsgAsync(
+                'gamepb.sharepb.ShareService', 'CheckCanShare', checkReq
+            );
+            const checkReply = types.CheckCanShareReply.decode(checkBody);
+            
+            if (!checkReply.can_share) {
+                this._markDoneToday('share');
+                return false;
+            }
+
+            // 上报分享
+            const reportReq = types.ReportShareRequest.encode(
+                types.ReportShareRequest.create({ shared: true })
+            ).finish();
+            await this.sendMsgAsync('gamepb.sharepb.ShareService', 'ReportShare', reportReq);
+            await sleep(300);
+
+            // 领取奖励
+            const claimReq = types.ClaimShareRewardRequest.encode(
+                types.ClaimShareRewardRequest.create({ claimed: true })
+            ).finish();
+            const { body: claimBody } = await this.sendMsgAsync(
+                'gamepb.sharepb.ShareService', 'ClaimShareReward', claimReq
+            );
+            const claimReply = types.ClaimShareRewardReply.decode(claimBody);
+
+            if (claimReply.success || claimReply.items?.length > 0) {
+                this.log('分享', `📤 分享奖励已领取: ${this._getRewardSummary(claimReply.items)}`);
+                this._markDoneToday('share');
+                return true;
+            }
+            this._markDoneToday('share');
+            return false;
+        } catch (e) {
+            if (e.message.includes('已领取') || e.message.includes('已分享')) {
+                this._markDoneToday('share');
+            }
+            return false;
+        }
+    }
+
+    // --- 3. 月卡奖励 ---
+    async _claimMonthCard(force = false) {
+        if (!force && this._isDoneToday('monthCard')) return false;
+
+        try {
+            // 获取月卡信息
+            const infoReq = types.GetMonthCardInfosRequest.encode(
+                types.GetMonthCardInfosRequest.create({})
+            ).finish();
+            const { body: infoBody } = await this.sendMsgAsync(
+                'gamepb.mallpb.MallService', 'GetMonthCardInfos', infoReq
+            );
+            const infoReply = types.GetMonthCardInfosReply.decode(infoBody);
+            const infos = infoReply.infos || [];
+
+            // 筛选可领取的月卡
+            const claimable = infos.filter(x => x.can_claim && x.goods_id > 0);
+            if (claimable.length === 0) {
+                this._markDoneToday('monthCard');
+                return false;
+            }
+
+            let claimed = 0;
+            for (const info of claimable) {
+                try {
+                    const claimReq = types.ClaimMonthCardRewardRequest.encode(
+                        types.ClaimMonthCardRewardRequest.create({ goods_id: info.goods_id })
+                    ).finish();
+                    const { body: claimBody } = await this.sendMsgAsync(
+                        'gamepb.mallpb.MallService', 'ClaimMonthCardReward', claimReq
+                    );
+                    const claimReply = types.ClaimMonthCardRewardReply.decode(claimBody);
+                    this.log('月卡', `📅 月卡奖励已领取: ${this._getRewardSummary(claimReply.items)}`);
+                    claimed++;
+                    await sleep(300);
+                } catch (e) { /* 单个月卡领取失败 */ }
+            }
+
+            this._markDoneToday('monthCard');
+            return claimed > 0;
+        } catch (e) {
+            this._markDoneToday('monthCard');
+            return false;
+        }
+    }
+
+    // --- 4. 邮箱奖励 ---
+    async _claimEmailRewards(force = false) {
+        if (!force && this._isDoneToday('email')) return { claimed: 0 };
+
+        try {
+            // 获取两个邮箱的邮件
+            const emails = [];
+            for (const boxType of [1, 2]) {
+                try {
+                    const req = types.GetEmailListRequest.encode(
+                        types.GetEmailListRequest.create({ box_type: boxType })
+                    ).finish();
+                    const { body: replyBody } = await this.sendMsgAsync(
+                        'gamepb.emailpb.EmailService', 'GetEmailList', req
+                    );
+                    const reply = types.GetEmailListReply.decode(replyBody);
+                    for (const email of (reply.emails || [])) {
+                        if (email.has_reward && !email.claimed) {
+                            emails.push({ ...email, boxType });
+                        }
+                    }
+                } catch (e) { /* 单个邮箱获取失败 */ }
+            }
+
+            if (emails.length === 0) {
+                this._markDoneToday('email');
+                return { claimed: 0 };
+            }
+
+            let claimed = 0;
+            let totalRewards = [];
+
+            // 尝试批量领取，失败则单个领取
+            for (const email of emails) {
+                try {
+                    // 先尝试批量领取
+                    const batchReq = types.BatchClaimEmailRequest.encode(
+                        types.BatchClaimEmailRequest.create({ box_type: email.boxType, email_id: email.id })
+                    ).finish();
+                    const { body: batchBody } = await this.sendMsgAsync(
+                        'gamepb.emailpb.EmailService', 'BatchClaimEmail', batchReq
+                    );
+                    const batchReply = types.BatchClaimEmailReply.decode(batchBody);
+                    if (batchReply.items) totalRewards.push(...batchReply.items);
+                    claimed++;
+                } catch (e) {
+                    // 批量失败，尝试单个领取
+                    try {
+                        const singleReq = types.ClaimEmailRequest.encode(
+                            types.ClaimEmailRequest.create({ box_type: email.boxType, email_id: email.id })
+                        ).finish();
+                        const { body: singleBody } = await this.sendMsgAsync(
+                            'gamepb.emailpb.EmailService', 'ClaimEmail', singleReq
+                        );
+                        const singleReply = types.ClaimEmailReply.decode(singleBody);
+                        if (singleReply.items) totalRewards.push(...singleReply.items);
+                        claimed++;
+                    } catch (e2) { /* 单个也失败 */ }
+                }
+                await sleep(100);
+            }
+
+            if (claimed > 0) {
+                this.log('邮箱', `📧 领取邮件奖励 ×${claimed}: ${this._getRewardSummary(totalRewards)}`);
+            }
+            this._markDoneToday('email');
+            return { claimed };
+        } catch (e) {
+            this._markDoneToday('email');
+            return { claimed: 0 };
+        }
+    }
+
+    // --- 5. QQ会员奖励 ---
+    async _claimVipGift(force = false) {
+        if (!force && this._isDoneToday('vipGift')) return false;
+
+        try {
+            // 获取会员礼包状态
+            const statusReq = types.GetDailyGiftStatusRequest.encode(
+                types.GetDailyGiftStatusRequest.create({})
+            ).finish();
+            const { body: statusBody } = await this.sendMsgAsync(
+                'gamepb.qqvippb.QQVipService', 'GetDailyGiftStatus', statusReq
+            );
+            const statusReply = types.GetDailyGiftStatusReply.decode(statusBody);
+
+            if (!statusReply.can_claim) {
+                this._markDoneToday('vipGift');
+                return false;
+            }
+
+            // 领取礼包
+            const claimReq = types.ClaimDailyGiftRequest.encode(
+                types.ClaimDailyGiftRequest.create({})
+            ).finish();
+            const { body: claimBody } = await this.sendMsgAsync(
+                'gamepb.qqvippb.QQVipService', 'ClaimDailyGift', claimReq
+            );
+            const claimReply = types.ClaimDailyGiftReply.decode(claimBody);
+
+            if (claimReply.items?.length > 0) {
+                this.log('会员', `👑 QQ会员奖励已领取: ${this._getRewardSummary(claimReply.items)}`);
+                this._markDoneToday('vipGift');
+                return true;
+            }
+            this._markDoneToday('vipGift');
+            return false;
+        } catch (e) {
+            // 已领取错误码处理
+            if (e.message.includes('1021002') || e.message.includes('已领取')) {
+                this._markDoneToday('vipGift');
+            }
+            return false;
+        }
+    }
+
+    // --- 6. 点券购买化肥 ---
+    async _buyOrganicFertilizer(force = false) {
+        const COOLDOWN_MS = 10 * 60 * 1000; // 10分钟冷却
+        const now = Date.now();
+        
+        if (!force && now - this.lastFertilizerBuyAt < COOLDOWN_MS) return 0;
+        if (!force && this._isDoneToday('fertilizerBuy')) return 0;
+
+        try {
+            // 获取商城列表
+            const reqBody = types.GetMallListBySlotTypeRequest.encode(
+                types.GetMallListBySlotTypeRequest.create({ slot_type: 1 })
+            ).finish();
+            const { body: replyBody } = await this.sendMsgAsync(
+                'gamepb.mallpb.MallService', 'GetMallListBySlotType', reqBody
+            );
+            const reply = types.GetMallListBySlotTypeResponse.decode(replyBody);
+            const goodsList = reply.goods_list || [];
+
+            // 查找有机化肥商品 (goods_id = 1002)
+            let fertilizerGoods = null;
+            for (const goodsBytes of goodsList) {
+                try {
+                    const goods = types.MallGoods.decode(goodsBytes);
+                    if (goods.goods_id === 1002) {
+                        fertilizerGoods = goods;
+                        break;
+                    }
+                } catch (e) { /* 解析失败 */ }
+            }
+
+            if (!fertilizerGoods) {
+                this._markDoneToday('fertilizerBuy');
+                return 0;
+            }
+
+            let totalBought = 0;
+            const MAX_ROUNDS = 100;
+            const BUY_PER_ROUND = 10;
+
+            for (let i = 0; i < MAX_ROUNDS; i++) {
+                try {
+                    const purchaseReq = types.PurchaseRequest.encode(
+                        types.PurchaseRequest.create({ goods_id: fertilizerGoods.goods_id, count: BUY_PER_ROUND })
+                    ).finish();
+                    await this.sendMsgAsync('gamepb.mallpb.MallService', 'Purchase', purchaseReq);
+                    totalBought += BUY_PER_ROUND;
+                    await sleep(100);
+                } catch (e) {
+                    // 余额不足或其他错误
+                    if (e.message.includes('余额不足') || e.message.includes('点券不足') || 
+                        e.message.includes('1000019') || e.message.includes('不足')) {
+                        break;
+                    }
+                    break;
+                }
+            }
+
+            if (totalBought > 0) {
+                this.log('商城', `🧪 点券购买有机化肥 ×${totalBought}`);
+                this.lastFertilizerBuyAt = now;
+            }
+            
+            return totalBought;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    // --- 7. 自动使用化肥礼包 ---
+    async _useFertilizerGiftPacks(force = false) {
+        if (!force && this._isDoneToday('fertilizerUse')) return 0;
+
+        const FERTILIZER_GIFT_IDS = new Set([100003, 100004]); // 化肥礼包ID
+        const FERTILIZER_ITEM_IDS = new Map([
+            [80001, { type: 'normal', hours: 1 }],
+            [80002, { type: 'normal', hours: 4 }],
+            [80003, { type: 'normal', hours: 8 }],
+            [80004, { type: 'normal', hours: 12 }],
+            [80011, { type: 'organic', hours: 1 }],
+            [80012, { type: 'organic', hours: 4 }],
+            [80013, { type: 'organic', hours: 8 }],
+            [80014, { type: 'organic', hours: 12 }],
+        ]);
+        const CONTAINER_LIMIT_HOURS = 990;
+        const NORMAL_CONTAINER_ID = 1011;
+        const ORGANIC_CONTAINER_ID = 1012;
+
+        try {
+            const bagReply = await this._getBag();
+            const items = this._getBagItems(bagReply);
+
+            // 获取当前容器时长
+            let normalSec = 0, organicSec = 0;
+            for (const it of items) {
+                const id = toNum(it.id);
+                const count = toNum(it.count);
+                if (id === NORMAL_CONTAINER_ID) normalSec = count;
+                if (id === ORGANIC_CONTAINER_ID) organicSec = count;
+            }
+            const containerHours = {
+                normal: normalSec / 3600,
+                organic: organicSec / 3600,
+            };
+
+            // 收集可使用的化肥道具
+            const toUse = [];
+            for (const it of items) {
+                const id = toNum(it.id);
+                const count = toNum(it.count);
+                if (count <= 0) continue;
+                
+                // 1. 先使用化肥礼包
+                if (FERTILIZER_GIFT_IDS.has(id)) {
+                    toUse.push({ id, count, isGift: true });
+                }
+                // 2. 使用化肥道具
+                else if (FERTILIZER_ITEM_IDS.has(id)) {
+                    const info = FERTILIZER_ITEM_IDS.get(id);
+                    const currentHours = info.type === 'normal' ? containerHours.normal : containerHours.organic;
+                    if (currentHours < CONTAINER_LIMIT_HOURS) {
+                        const remainHours = CONTAINER_LIMIT_HOURS - currentHours;
+                        const maxCount = Math.floor(remainHours / info.hours);
+                        const useCount = Math.min(count, maxCount);
+                        if (useCount > 0) {
+                            toUse.push({ id, count: useCount, isGift: false, type: info.type, hours: info.hours });
+                        }
+                    }
+                }
+            }
+
+            if (toUse.length === 0) {
+                this._markDoneToday('fertilizerUse');
+                return 0;
+            }
+
+            let used = 0;
+            for (const item of toUse) {
+                try {
+                    // 尝试批量使用
+                    const batchReq = types.BatchUseRequest.encode(
+                        types.BatchUseRequest.create({
+                            items: [{ item_id: toLong(item.id), count: toLong(item.count) }]
+                        })
+                    ).finish();
+                    await this.sendMsgAsync('gamepb.itempb.ItemService', 'BatchUse', batchReq);
+                    used += item.count;
+                    
+                    // 更新容器计数
+                    if (!item.isGift && item.type && item.hours) {
+                        if (item.type === 'normal') containerHours.normal += item.count * item.hours;
+                        else containerHours.organic += item.count * item.hours;
+                    }
+                } catch (e) {
+                    // 批量失败，尝试单个使用
+                    try {
+                        const singleReq = types.UseRequest.encode(
+                            types.UseRequest.create({ item_id: toLong(item.id), count: toLong(item.count) })
+                        ).finish();
+                        await this.sendMsgAsync('gamepb.itempb.ItemService', 'Use', singleReq);
+                        used += item.count;
+                    } catch (e2) {
+                        // 容器已满
+                        if (e2.message.includes('1003002') || e2.message.includes('上限')) {
+                            continue;
+                        }
+                    }
+                }
+                await sleep(100);
+            }
+
+            if (used > 0) {
+                this.log('仓库', `🧴 使用化肥道具 ×${used}`);
+            }
+            this._markDoneToday('fertilizerUse');
+            return used;
+        } catch (e) {
+            this._markDoneToday('fertilizerUse');
+            return 0;
+        }
+    }
+
+    // --- 8. 图鉴奖励 ---
+    async _claimIllustratedRewards(force = false) {
+        if (!force && this._isDoneToday('illustrated')) return false;
+
+        try {
+            // 领取所有可领取的图鉴奖励
+            const claimReq = types.ClaimAllRewardsV2Request.encode(
+                types.ClaimAllRewardsV2Request.create({ only_claimable: true })
+            ).finish();
+            const { body: claimBody } = await this.sendMsgAsync(
+                'gamepb.illustratedpb.IllustratedService', 'ClaimAllRewardsV2', claimReq
+            );
+            const claimReply = types.ClaimAllRewardsV2Reply.decode(claimBody);
+
+            const allItems = [...(claimReply.items || []), ...(claimReply.bonus_items || [])];
+            if (allItems.length > 0) {
+                this.log('图鉴', `📖 图鉴奖励已领取: ${this._getRewardSummary(allItems)}`);
+                this._markDoneToday('illustrated');
+                return true;
+            }
+            this._markDoneToday('illustrated');
+            return false;
+        } catch (e) {
+            this._markDoneToday('illustrated');
+            return false;
+        }
     }
 
     // ================================================================

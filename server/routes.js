@@ -142,9 +142,12 @@ router.post('/accounts/add-by-code', async (req, res) => {
 
         res.json({ ok: true, data: { uin } });
 
-        // 通知前端刷新账号列表
+        // 通知前端刷新账号列表（使用脱敏列表广播给未鉴权客户端）
         const io = req.app.locals.io;
-        if (io) io.emit('accounts:list', botManager.listAccounts());
+        if (io) {
+            const { maskAccountsPublic } = require('./account-utils');
+            io.emit('accounts:list', maskAccountsPublic(botManager.listAccounts()));
+        }
     } catch (err) {
         res.status(400).json({ ok: false, error: err.message });
     }
@@ -163,10 +166,21 @@ router.get('/accounts', (req, res) => {
             .filter(Boolean);
 
         const isAdmin = req.user.role === 'admin';
+        const allowedSet = new Set(allowed);
+        const hasAllowed = (targetUin) => {
+            if (allowedSet.has(targetUin)) return true;
+            if (targetUin && targetUin.startsWith('wx_')) {
+                const stripped = targetUin.slice(3);
+                if (allowedSet.has(stripped)) return true;
+            } else if (targetUin) {
+                if (allowedSet.has('wx_' + targetUin)) return true;
+            }
+            return false;
+        };
 
         accounts = accounts.map(a => {
             // 判定是否为本人账号（管理员视为拥有所有账号）
-            const isOwn = isAdmin || allowed.includes(a.uin);
+            const isOwn = isAdmin || hasAllowed(a.uin);
             const isWx = a.platform === 'wx' || (a.uin && a.uin.startsWith('wx_'));
 
             // 头像：QQ用户用QQ头像API，微信用户用默认头像
@@ -389,9 +403,12 @@ router.delete('/accounts/:uin', canAccessUin, async (req, res) => {
             }
         }
 
-        // 广播更新后的账号列表给所有客户端
+        // 广播更新后的账号列表给所有客户端（脱敏）
         const io = req.app.locals.io;
-        if (io) io.emit('accounts:list', botManager.listAccounts());
+        if (io) {
+            const { maskAccountsPublic } = require('./account-utils');
+            io.emit('accounts:list', maskAccountsPublic(botManager.listAccounts()));
+        }
         res.json({ ok: true });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

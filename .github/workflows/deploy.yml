@@ -19,5 +19,7 @@ jobs:
           script: |
             cd /root/qq-farm-bot
             git pull origin main
-            docker compose down
-            docker compose up -d --build
+            # 指定使用 dev 配置文件先停止旧容器
+            docker compose -f docker-compose.dev.yml down
+            # 指定使用 dev 配置文件进行构建并后台启动
+            docker compose -f docker-compose.dev.yml up -d --build
