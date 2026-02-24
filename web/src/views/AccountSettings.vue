@@ -103,7 +103,7 @@ const props = defineProps({ uin: String })
 
 const farmIntervalSec = ref(1)
 const friendIntervalSec = ref(10)
-const preferredSeedId = ref(29999)
+const preferredSeedId = ref(29999)  // 29999 = 白萝卜仙人
 const saving = ref(false)
 const userLevel = ref(1)
 
@@ -119,7 +119,8 @@ async function fetchConfig() {
     farmIntervalSec.value = Math.round((data.farmInterval || 1000) / 1000)
     friendIntervalSec.value = Math.round((data.friendInterval || 10000) / 1000)
     userLevel.value = data.userState?.level || 1
-    preferredSeedId.value = data.preferredSeedId || 29999
+    // 显式判断，保留 0 表示自动选择
+    preferredSeedId.value = data.preferredSeedId ?? 0
   } catch { /* */ }
 }
 
