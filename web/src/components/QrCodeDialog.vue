@@ -1,89 +1,125 @@
 <template>
   <el-dialog
     v-model="dialogVisible"
-    title="添加账号 - QQ 扫码登录"
+    title="添加账号"
     :width="isMobile ? '92%' : '480px'"
     :close-on-click-modal="false"
     @close="handleClose"
   >
-    <!-- 步骤1: 输入QQ号 -->
-    <div v-if="qrStatus === 'idle' || qrStatus === 'loading'">
-      <el-form :model="form" label-width="100px" @submit.prevent="handleSubmit">
-        <el-form-item label="QQ号" required>
-          <el-input
-            v-model="form.uin"
-            placeholder="请输入QQ号作为标识"
-            :disabled="qrStatus === 'loading' || !!initialUin"
-          />
-        </el-form-item>
-
-        <el-form-item label="农场巡查">
-          <el-input-number
-            v-model="form.farmIntervalSec"
-            :min="1"
-            :max="3600"
-            :step="5"
-            :disabled="qrStatus === 'loading'"
-          />
-          <span class="unit-text">秒</span>
-        </el-form-item>
-        <el-form-item label="好友巡查">
-          <el-input-number
-            v-model="form.friendIntervalSec"
-            :min="1"
-            :max="3600"
-            :step="5"
-            :disabled="qrStatus === 'loading'"
-          />
-          <span class="unit-text">秒</span>
-        </el-form-item>
-      </el-form>
-    </div>
-
-    <!-- 步骤2: 显示二维码 -->
-    <div v-else-if="qrStatus === 'pending'" class="qr-container">
-      <div class="qr-hint">请使用 QQ 扫描下方二维码</div>
-      <div class="qr-image-wrapper">
-        <img v-if="qrBase64" :src="qrBase64" class="qr-image" alt="登录二维码" />
-        <el-skeleton v-else :rows="0" animated style="width: 300px; height: 300px;" />
+    <!-- 扫码流程中（pending/scanned/error）不显示 tabs -->
+    <template v-if="qrStatus === 'pending' || qrStatus === 'scanned' || qrStatus === 'error'">
+      <!-- 显示二维码 -->
+      <div v-if="qrStatus === 'pending'" class="qr-container">
+        <div class="qr-hint">请使用 QQ 扫描下方二维码</div>
+        <div class="qr-image-wrapper">
+          <img v-if="qrBase64" :src="qrBase64" class="qr-image" alt="登录二维码" />
+          <el-skeleton v-else :rows="0" animated style="width: 300px; height: 300px;" />
+        </div>
+        <div class="qr-tip">二维码有效时间约 3 分钟</div>
+        <el-progress
+          :percentage="qrCountdownPct"
+          :stroke-width="4"
+          :show-text="false"
+          status="success"
+          style="margin-top: 12px;"
+        />
       </div>
-      <div class="qr-tip">二维码有效时间约 3 分钟</div>
-      <el-progress
-        :percentage="qrCountdownPct"
-        :stroke-width="4"
-        :show-text="false"
-        status="success"
-        style="margin-top: 12px;"
-      />
-    </div>
-
-    <!-- 步骤3: 扫码成功 -->
-    <div v-else-if="qrStatus === 'scanned'" class="qr-container">
-      <el-result icon="success" title="扫码成功" sub-title="正在登录游戏..." />
-    </div>
-
-    <!-- 错误状态 -->
-    <div v-else-if="qrStatus === 'error'" class="qr-container">
-      <el-result icon="error" title="扫码失败" sub-title="二维码已过期或出错，请重试">
-        <template #extra>
-          <el-button type="primary" @click="resetForm">重新获取</el-button>
-        </template>
-      </el-result>
-    </div>
-
-    <template #footer v-if="qrStatus === 'idle' || qrStatus === 'loading'">
-      <el-button @click="handleClose">取消</el-button>
-      <el-button
-        type="primary"
-        @click="handleSubmit"
-        :loading="qrStatus === 'loading'"
-        :disabled="!form.uin.trim()"
-      >
-        获取二维码
-      </el-button>
+      <!-- 扫码成功 -->
+      <div v-else-if="qrStatus === 'scanned'" class="qr-container">
+        <el-result icon="success" title="扫码成功" sub-title="正在登录游戏..." />
+      </div>
+      <!-- 错误状态 -->
+      <div v-else-if="qrStatus === 'error'" class="qr-container">
+        <el-result icon="error" title="扫码失败" sub-title="二维码已过期或出错，请重试">
+          <template #extra>
+            <el-button type="primary" @click="resetForm">重新获取</el-button>
+          </template>
+        </el-result>
+      </div>
     </template>
-    <template #footer v-else-if="qrStatus === 'pending'">
-      <el-button @click="handleClose">取消</el-button>
+
+    <!-- 初始状态：显示 tabs -->
+    <template v-else>
+      <el-tabs v-model="activeTab" stretch>
+        <el-tab-pane label="QQ扫码登录" name="qr">
+          <el-form :model="form" label-width="100px" @submit.prevent="handleSubmit">
+            <el-form-item label="QQ号" required>
+              <el-input
+                v-model="form.uin"
+                placeholder="请输入QQ号作为标识"
+                :disabled="qrStatus === 'loading' || !!initialUin"
+              />
+            </el-form-item>
+            <el-form-item label="农场巡查">
+              <el-input-number
+                v-model="form.farmIntervalSec"
+                :min="1"
+                :max="3600"
+                :step="5"
+                :disabled="qrStatus === 'loading'"
+              />
+              <span class="unit-text">秒</span>
+            </el-form-item>
+            <el-form-item label="好友巡查">
+              <el-input-number
+                v-model="form.friendIntervalSec"
+                :min="1"
+                :max="3600"
+                :step="5"
+                :disabled="qrStatus === 'loading'"
+              />
+              <span class="unit-text">秒</span>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+
+        <el-tab-pane label="微信Code登录" name="manual">
+          <el-form :model="manualForm" label-width="100px" @submit.prevent="handleManualSubmit">
+            <el-form-item label="authCode" required>
+              <el-input
+                v-model="manualForm.authCode"
+                placeholder="请粘贴 authCode"
+                type="textarea"
+                :rows="2"
+              />
+            </el-form-item>
+            <el-form-item label="农场巡查">
+              <el-input-number v-model="manualForm.farmIntervalSec" :min="1" :max="3600" :step="5" />
+              <span class="unit-text">秒</span>
+            </el-form-item>
+            <el-form-item label="好友巡查">
+              <el-input-number v-model="manualForm.friendIntervalSec" :min="1" :max="3600" :step="5" />
+              <span class="unit-text">秒</span>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
+    </template>
+
+    <template #footer>
+      <template v-if="qrStatus === 'pending'">
+        <el-button @click="handleClose">取消</el-button>
+      </template>
+      <template v-else-if="qrStatus === 'idle' || qrStatus === 'loading'">
+        <el-button @click="handleClose">取消</el-button>
+        <el-button
+          v-if="activeTab === 'qr'"
+          type="primary"
+          @click="handleSubmit"
+          :loading="qrStatus === 'loading'"
+          :disabled="!form.uin.trim()"
+        >
+          获取二维码
+        </el-button>
+        <el-button
+          v-else
+          type="primary"
+          @click="handleManualSubmit"
+          :disabled="!manualForm.authCode.trim()"
+        >
+          添加账号
+        </el-button>
+      </template>
     </template>
   </el-dialog>
 </template>
@@ -114,9 +150,18 @@ const dialogVisible = computed({
   set: (v) => emit('update:visible', v),
 })
 
+const activeTab = ref('qr')
+
 const form = ref({
   uin: '',
   platform: 'qq',
+  farmIntervalSec: 10,
+  friendIntervalSec: 10,
+})
+
+const manualForm = ref({
+  authCode: '',
+  platform: 'wx',
   farmIntervalSec: 10,
   friendIntervalSec: 10,
 })
@@ -168,6 +213,17 @@ function handleSubmit() {
     platform: form.value.platform,
     farmInterval: form.value.farmIntervalSec * 1000,
     friendInterval: form.value.friendIntervalSec * 1000,
+  })
+}
+
+function handleManualSubmit() {
+  if (!manualForm.value.authCode.trim()) return
+  emit('confirm', {
+    platform: manualForm.value.platform,
+    farmInterval: manualForm.value.farmIntervalSec * 1000,
+    friendInterval: manualForm.value.friendIntervalSec * 1000,
+    code: manualForm.value.authCode.trim(),
+    manual: true,
   })
 }
 

@@ -77,6 +77,11 @@ export function cancelQrLogin(uin) {
   return api.post(`/accounts/${uin}/qr-cancel`)
 }
 
+// 手动添加账号（通过 authCode）
+export function addAccountByCode(data) {
+  return api.post('/accounts/add-by-code', data)
+}
+
 // Bot 控制
 export function startBot(uin) {
   return api.post(`/accounts/${uin}/start`)

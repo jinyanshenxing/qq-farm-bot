@@ -106,6 +106,50 @@ router.use(authMiddleware);
 // ============================================================
 //  账号列表
 // ============================================================
+
+/** POST /api/accounts/add-by-code - 微信 authCode 添加账号 */
+router.post('/accounts/add-by-code', async (req, res) => {
+    try {
+        const { code, farmInterval, friendInterval } = req.body || {};
+        if (!code) {
+            return res.status(400).json({ ok: false, error: 'authCode 不能为空' });
+        }
+
+        // 微信用户自动生成随机唯一标识
+        const uin = 'wx_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const actualPlatform = 'wx';
+
+        // 创建用户记录
+        db.createUser({ uin, platform: actualPlatform, farmInterval: farmInterval || 10000, friendInterval: friendInterval || 10000 });
+
+        // 保存 session
+        db.saveSession(uin, code);
+
+        // 启动 bot
+        await botManager._startBot(uin, code, { platform: actualPlatform, farmInterval, friendInterval });
+
+        // 普通用户添加账号时，自动绑定到该用户
+        if (req.user.role !== 'admin') {
+            const adminUser = db.getAdminUserById(req.user.id);
+            if (adminUser) {
+                const currentUins = (adminUser.allowed_uins || '').split(',').map(s => s.trim()).filter(Boolean);
+                if (!currentUins.includes(uin)) {
+                    currentUins.push(uin);
+                    db.updateAdminUser(adminUser.id, { allowed_uins: currentUins.join(',') });
+                }
+            }
+        }
+
+        res.json({ ok: true, data: { uin } });
+
+        // 通知前端刷新账号列表
+        const io = req.app.locals.io;
+        if (io) io.emit('accounts:list', botManager.listAccounts());
+    } catch (err) {
+        res.status(400).json({ ok: false, error: err.message });
+    }
+});
+
 /** GET /api/accounts */
 router.get('/accounts', (req, res) => {
     try {
@@ -123,31 +167,34 @@ router.get('/accounts', (req, res) => {
         accounts = accounts.map(a => {
             // 判定是否为本人账号（管理员视为拥有所有账号）
             const isOwn = isAdmin || allowed.includes(a.uin);
-            
-            // 【核心修改点 1】：在脱敏之前，基于真实的 a.uin 生成头像地址
-            const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${a.uin}&s=100`;
+            const isWx = a.platform === 'wx' || (a.uin && a.uin.startsWith('wx_'));
+
+            // 头像：QQ用户用QQ头像API，微信用户用默认头像
+            const avatarUrl = isWx
+                ? 'https://q1.qlogo.cn/g?b=qq&nk=0&s=100'
+                : `https://q1.qlogo.cn/g?b=qq&nk=${a.uin}&s=100`;
+
+            // 显示标识：QQ用户显示QQ号，微信用户显示 "微信用户"
+            const displayUin = isWx ? '微信用户' : a.uin;
 
             if (isOwn) {
-                // 本人账号：数据完整返回
                 return { 
                     ...a, 
                     isOwn: true, 
-                    displayUin: a.uin, // 显示原号
+                    displayUin,
                     avatar: avatarUrl 
                 };
             } else {
-                // 【核心修改点 2】：非本人账号，进行文字脱敏，但 avatar 依然使用上面生成的真实链接
-                const maskedUin = a.uin.slice(0, 3) + '****' + a.uin.slice(-2);
+                const maskedUin = isWx ? '微信用户' : (a.uin.slice(0, 3) + '****' + a.uin.slice(-2));
                 const maskedNick = a.nickname ? a.nickname.charAt(0) + '***' : '隐藏用户';
                 
                 return {
                     ...a,
-                    // 注意：为了安全，这里的 uin 依然保持脱敏状态，防止前端 key 泄露
-                    uin: maskedUin, 
+                    uin: a.uin, // 保留真实uin用于前端key和路由
                     displayUin: maskedUin, 
                     nickname: maskedNick,
                     isOwn: false,
-                    avatar: avatarUrl // 这里的链接里包含了真实的 UIN 数字，保证头像能出来
+                    avatar: avatarUrl
                 };
             }
         });

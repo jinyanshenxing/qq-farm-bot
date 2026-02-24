@@ -21,14 +21,15 @@
   v-for="acc in ownAccounts"
   :key="acc.uin"
   :value="acc.uin"
+  :label="acc.nickname || acc.displayUin || acc.uin"
 >
   <div style="display:flex;align-items:center;gap:8px;">
     <img 
-      :src="`https://q1.qlogo.cn/g?b=qq&nk=${acc.uin}&s=40`" 
+      :src="acc.avatar || `https://q1.qlogo.cn/g?b=qq&nk=${acc.uin}&s=40`" 
       style="width:22px;height:22px;border-radius:50%;" 
     />
     
-    <span>{{ acc.nickname || acc.displayUin }}</span>
+    <span>{{ acc.nickname || acc.displayUin || acc.uin }}</span>
     
     <span style="margin-left:auto;">
       {{ acc.status === 'running' ? '🟢' : '⚪' }}
@@ -174,7 +175,7 @@
       </div>
       <div class="account-selector" v-if="ownAccounts.length > 0">
         <el-select v-model="currentUin" placeholder="选择账号" size="small" @change="onAccountChange" style="width:100%">
-          <el-option v-for="acc in ownAccounts" :key="acc.uin" :label="`${acc.nickname || acc.uin}`" :value="acc.uin" />
+          <el-option v-for="acc in ownAccounts" :key="acc.uin" :label="`${acc.nickname || acc.displayUin || acc.uin}`" :value="acc.uin" />
         </el-select>
       </div>
       <nav class="sidebar-nav">

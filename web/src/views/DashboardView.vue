@@ -66,7 +66,7 @@
               <span class="acc-uin">{{ acc.nickname || acc.uin }}</span>
               <div class="acc-status-dot" :class="acc.status" />
             </div>
-            <div class="acc-sub">{{ acc.uin }}</div>
+            <div class="acc-sub">{{ acc.displayUin || acc.uin }}</div>
           </div>
         </div>
         <div class="acc-details">
@@ -126,7 +126,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, VideoPlay, VideoPause, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth.js'
-import { getAccounts, startBot, stopBot, deleteAccount, startQrLogin, cancelQrLogin } from '../api/index.js'
+import { getAccounts, startBot, stopBot, deleteAccount, startQrLogin, cancelQrLogin, addAccountByCode } from '../api/index.js'
 import { onEvent, offEvent } from '../socket/index.js'
 import QrCodeDialog from '../components/QrCodeDialog.vue'
 
@@ -178,6 +178,24 @@ async function handleDelete(uin) {
 }
 
 async function handleQrConfirm(form) {
+  // 手动输入 authCode 模式（微信）
+  if (form.manual && form.code) {
+    try {
+      await addAccountByCode({
+        code: form.code,
+        farmInterval: form.farmInterval,
+        friendInterval: form.friendInterval,
+      })
+      ElMessage.success('账号添加成功')
+      showQrDialog.value = false
+      fetchAccounts()
+    } catch (e) {
+      ElMessage.error(e.message)
+    }
+    return
+  }
+
+  // 扫码登录模式
   qrUin.value = form.uin
   qrStatus.value = 'loading'
   try {
